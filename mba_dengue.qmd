@@ -1,0 +1,2241 @@
+---
+
+---
+title: "Projeto final"
+author: "Alexandre"
+format:
+  pdf:
+    toc: true
+    toc-location: left
+    toc-title: "Sumário"
+    opts_chunk: 
+    fig.align: "left"
+    fig-dpi: 1000
+    message: false
+    warning: false
+    echo: false
+    results: asis
+editor: visual
+lang: pt
+colorlinks: true
+---
+
+```{r setup, include=FALSE}
+knitr:: opts_chunk$ set(echo = F, message = F, warning=F)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#habilitando bibliotecas
+#install.packages("randomForest")
+#install.packages("equatiomatic")
+#install.packages("devtools")
+#devtools::install_github("cran/DMwR")# pacote para reamostragem
+#install.packages("Boruta")
+#install.packages("xlsx")
+#install.packages("Hmisc")
+#devtools::install_github("datalorax/equatiomatic")
+library(tidyverse)
+library(DMwR)
+library(readxl)
+library(writexl)
+library(car)
+library(rgl)
+library(rstatix)#analises estatísticas 
+library(DescTools)
+library(emmeans)
+library(ggthemes)
+library(skimr)# estatistica descritiva completa
+library(fastDummies)
+library(reshape2)
+library(jtools)
+library(stargazer)
+library(lmtest)
+library(caret)
+library(pROC)
+library(ROCR)
+library(nnet)
+library(magick)
+library(cowplot)
+library(globals)
+library(psych)
+library(knitr)
+library(kableExtra)
+library(naivebayes)
+library(pheatmap)#hitmap
+library(tidymodels)
+library(nortest)
+library(rpart.plot)
+library(xgboost)
+library(randomForest)
+library(equatiomatic)
+library(xlsx)
+library(readr)
+library(Boruta)
+library(Hmisc)
+```
+
+# Predição de hospitalização dor dengue no Estado de São Paulo (2019-2024)
+
+Os dados são uriundos do sistema SINAN-SUS referentes aos casos confirmados de dengue, afastando diagnósticos de Chikungunya. Dados coletado e tabulados entre os anos de 2019 e 2024.
+
+## Baixando o banco de dados
+
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+#baixando o dataframe 
+dengue <- read_csv("dengue.csv")
+dengue_t <- read_csv("dengue_t.csv")
+
+```
+
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+## criação de dataframe para gráfico geral
+
+#dengue_tl <- dengue_t |> 
+  #select(uf, ano_infec, hosp)
+```
+
+## Data wrangling
+
+Foram excluidos dados que poderiam vazar informações de hospitalização, além disso, dados de avaliações realizadas após a internação, foram tratados os dados faltantes com a inserção da mediana, adicionalmente, transformamos as varíaveis relevantes como fator.
+
+### Descrição das varíaveis do banco br
+
+```{r}
+nomes_t <- names(dengue_t)
+
+dengue_clean_t <- dengue_t |>
+  dplyr::select(
+    -sem_not,
+    -data_prim_sint,
+    -sem_pri,
+    -municipio,
+    -dg_data_ini,
+    -evol,
+    -local_infec,
+    -class_doenca
+  )
+
+dengue_clean_t <- dengue_clean_t |>
+  dplyr::filter(hosp == "nao" | hosp == "sim")
+
+
+dengue_clean_t <- dengue_clean_t |>
+  dplyr::select(
+    id = "...1",
+    "uf",
+    "ano_infec",
+    "idade_sint",
+    "sex",
+    "gest",
+    "raca",
+    "febre",
+    "mialgia",
+    "cefaleia",
+    "exantema",
+    "vomito",
+    "nausea",
+    "dor_costas",
+    "conjuntivite",
+    "artrite",
+    "artralgia",
+    "petequia",
+    "laco",
+    "leucopenia",
+    "dor_retro",
+    "dm2",
+    "has",
+    "hemato",
+    "hepaticas",
+    "renal",
+    "d_acido_pep",
+    "auto_imune",
+    "escol",
+    "hosp",
+    "soro_dengue",
+    "pcr",
+    "anti_prnt",
+    "dg_pulso",
+    "dg_pa_conv",
+    "dg_tempo_cap",
+    "dg_insuf",
+    "dg_taqui",
+    "dg_ext_fria",
+    "dg_vom_sangue",
+    "dg_fezes_sangue",
+    "dg_metro_vol",
+    "dg_sangue_snc",
+    "dg_enzi_figado",
+    "dg_miocardite",
+    "dg_alt_conc",
+    "dg_out_orgao",
+    "resul_elisa_deng",
+    "resul_iso_viral",
+    "soro_tipo_deng",
+    "resul_histopa",
+    "resul_imunoh",
+    "deng_mm_res"
+  )
+
+### tratamento de missing
+
+summary(dengue_clean_t)
+
+### Pacote para imputar valor
+dengue_clean_t$idade_sint <- with(dengue_clean_t, impute(idade_sint, median))
+
+summary(dengue_clean_t)
+
+### Excluir NA
+dengue_clean_t <- dengue_clean_t |>
+  na.omit()
+
+### transfomando as variáveis em factor
+dengue_clean_t$hosp <- as_factor(dengue_clean_t$hosp)
+convert <- c(4:52)
+dengue_clean_t[,convert] <- data.frame(apply(dengue_clean_t[convert], 2, as.factor))
+dengue_t <- NULL
+```
+
+### Descrição das varíaveis do banco sp
+
+```{r}
+
+nomes <- names(dengue)
+
+dengue_clean <- dengue |>
+  dplyr::select(
+    -sem_not,
+    -data_prim_sint,
+    -sem_pri,
+    -municipio,
+    -dg_data_ini,
+    -evol,
+    -local_infec,
+    -class_doenca
+  )
+
+dengue_clean <- dengue_clean |>
+  dplyr::filter(hosp == "nao" | hosp == "sim")
+
+
+dengue_clean <- dengue_clean |>
+  dplyr::select(
+    id = "...1",
+    "ano_infec",
+    "idade_sint",
+    "sex",
+    "gest",
+    "raca",
+    "febre",
+    "mialgia",
+    "cefaleia",
+    "exantema",
+    "vomito",
+    "nausea",
+    "dor_costas",
+    "conjuntivite",
+    "artrite",
+    "artralgia",
+    "petequia",
+    "laco",
+    "leucopenia",
+    "dor_retro",
+    "dm2",
+    "has",
+    "hemato",
+    "hepaticas",
+    "renal",
+    "d_acido_pep",
+    "auto_imune",
+    "escol",
+    "hosp",
+    "soro_dengue",
+    "pcr",
+    "anti_prnt",
+    "dg_pulso",
+    "dg_pa_conv",
+    "dg_tempo_cap",
+    "dg_insuf",
+    "dg_taqui",
+    "dg_ext_fria",
+    "dg_vom_sangue",
+    "dg_fezes_sangue",
+    "dg_metro_vol",
+    "dg_sangue_snc",
+    "dg_enzi_figado",
+    "dg_miocardite",
+    "dg_alt_conc",
+    "dg_out_orgao",
+    "resul_elisa_deng",
+    "resul_iso_viral",
+    "soro_tipo_deng",
+    "resul_histopa",
+    "resul_imunoh",
+    "deng_mm_res"
+  )
+
+### tratamento de missing
+
+summary(dengue_clean)
+
+### Pacote para imputar valor
+dengue_clean$idade_sint <- with(dengue_clean, impute(idade_sint, median))
+
+summary(dengue_clean)
+
+### Removendo NA
+
+dengue_clean <- dengue_clean |>
+  na.omit()
+
+### transfomando as variáveis em factor
+dengue_clean$hosp <- as_factor(dengue_clean$hosp)
+convert <- c(4:52)
+dengue_clean[,convert] <- data.frame(apply(dengue_clean[convert], 2, as.factor))
+dengue <- NULL
+```
+
+## Gráficos para descrição
+
+### Brasil
+
+```{r}
+options(scipen = 999)
+### hospitalização Brasil
+# Cálculo da frequência absoluta
+freq_abs_1 <- table(dengue_clean_t$hosp)
+
+# Cálculo da frequência relativa
+freq_rel_1 <- round((prop.table(freq_abs_1) * 100), 2)
+
+# Crie um dataframe com os dados
+dados_1 <- data.frame(hosp = names(freq_abs_1), freq_abs_1, freq_rel_1)
+
+# Crie o gráfico com ggplot
+tl1 <- ggplot(dados_1, aes(x = hosp)) +
+  geom_bar(aes(y = freq_abs_1, fill = hosp), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste(freq_abs_1, " (", freq_rel_1, "%)"), y = freq_abs_1 + 2), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  labs(title = "Hospitalizações por dengue",
+       x = "",
+       y = "Nº de casos") +
+  scale_fill_manual(values = c("grey", "red")) +
+  theme_classic()+
+  theme(legend.position = "none")+
+  scale_x_discrete(labels = c("nao" = "Não", "sim" = "Sim"))
+tl1
+
+#### Ano de infecção
+
+
+# Cálculo da frequência absoluta
+freq_abs_3 <- table(dengue_clean_t$ano_infec)
+
+# Cálculo da frequência relativa
+freq_rel_3 <- round((prop.table(freq_abs_3) * 100), 2)
+
+# Crie um dataframe com os dados
+dados_3 <- data.frame(ano_infec = names(freq_abs_3), freq_abs_3, freq_rel_3)
+
+# Crie o gráfico com ggplot
+tl2 <- ggplot(dados_3, aes(x = ano_infec)) +
+  geom_bar(aes(y = freq_abs_3, fill = ano_infec), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste(freq_abs_3, " (", freq_rel_3, "%)"), y = freq_abs_3 + 2), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  scale_y_continuous(breaks = seq(0, 6000000, 200000)) +
+  labs(title = "Casos de dengue por ano",
+       x = "Ano da infecção",
+       y = "Nº de casos0") +
+  scale_fill_manual(values = c("grey", "grey20", "grey40", "#87CEFA", "#00FFFF", "#3293a8", "red")) +
+  theme_classic()+
+  theme(legend.position = "none")
+
+tl2
+
+tl3 <- dengue_clean_t |> 
+  group_by(ano_infec) |>
+  summarise(table(ano_infec)) |>  
+  ggplot() +
+  aes(x = ano_infec, y = `table(ano_infec)` ) +
+  geom_line(size = 0.7, color = "grey50")+
+  geom_point(size=1.5, color = "black")+
+   scale_x_continuous(
+    breaks = seq(2018,2024, 1))+
+  scale_y_continuous(breaks = seq(0,6000000,100000))+
+  labs(title = "Número de infecções por dengue (ano)",
+       x= "Ano",
+       y= "Nº de infecções")+
+  theme_classic()
+  
+tl3
+  
+# Calcular a porcentagem
+dengue_tl_uf <- dengue_clean_t |> 
+  group_by(uf) |>
+  summarise(total = n()) |> 
+  tail(5) |> 
+  arrange(total) |>
+  mutate(percentage = total / sum(total) * 100)
+
+# Criar o gráfico com ggplot
+tl4 <- ggplot(dengue_tl_uf, aes(x = uf, y = total)) +
+  geom_bar(aes(fill = uf), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste0(round(percentage), "%")),
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 3, color = "black") +
+  labs(title = "Principais estados em número de casos",
+       x = "Estado (UF)",
+       y = "Nº de casos") +
+  scale_y_continuous(breaks = seq(0, 6000000, 200000)) +
+  scale_fill_manual(values = c("grey", "grey20", "grey40", "red", "grey60")) +
+  theme_classic()+
+  theme(legend.position = "none")
+
+tl4
+
+
+dengue_clean_t$idade_sint <- as.numeric(dengue_clean_t$idade_sint)
+tl5 <- ggplot(dengue_clean_t, aes(x = idade_sint)) +
+  geom_histogram(binwidth = 4, fill = "skyblue", color = "black", alpha = 1.5) +
+  labs(title = "",
+       x = "Idade (anos)",
+       y = "Observações (n)") +
+  theme_classic()+
+  theme(legend.position = "none")
+
+
+
+plot_grid(tl2,tl4,tl1,
+          
+          labels = c('A', 'B', 'C' ), nrow=2, ncol=2, scale = c(1, 1, 1))
+
+ggsave("desc_1.tiff", width = 20, height= 11, dpi=400)
+ggsave("desc_1.jpg", width = 20, height= 11, dpi=400)
+
+
+plot_grid (tl5)
+
+ggsave ("idade_t.tiff", width = 8, height= 6, dpi=400)
+ggsave ("idade_t.jpg", width = 8, height= 6, dpi=400)
+
+print("Estátistica descritiva da varìavel idade_sint")
+summary(dengue_clean_t$idade_sint)
+```
+
+### SP
+
+```{r}
+# Cálculo da frequência absoluta
+freq_abs <- table(dengue_clean$sex)
+
+# Cálculo da frequência relativa
+freq_rel <- round((prop.table(freq_abs) * 100), 2)
+
+# Crie um dataframe com os dados
+dados <- data.frame(sex = names(freq_abs), freq_abs = freq_abs, freq_rel = freq_rel)
+
+# Crie o gráfico com ggplot
+g1 <- ggplot(dados, aes(x = sex)) +
+  geom_bar(aes(y = freq_abs, fill = sex), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste(freq_abs, " (", freq_rel, "%)"), y = freq_abs + 2), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  labs(title = "Frequência absoluta e relativa por sexo",
+       x = "Sexo",
+       y = "Frequência Absoluta") +
+  scale_fill_manual(values = c("grey", "skyblue")) +
+  theme_classic()+
+  theme(legend.position = "none")+
+  scale_x_discrete(labels = c("fem" = "Feminino", "male" = "Masculino"))
+
+# Cálculo da frequência absoluta
+freq_abs_1 <- table(dengue_clean$hosp)
+
+# Cálculo da frequência relativa
+freq_rel_1 <- round((prop.table(freq_abs_1) * 100), 2)
+
+# Crie um dataframe com os dados
+dados_1 <- data.frame(hosp = names(freq_abs_1), freq_abs_1, freq_rel_1)
+
+# Crie o gráfico com ggplot
+g2 <- ggplot(dados_1, aes(x = hosp)) +
+  geom_bar(aes(y = freq_abs_1, fill = hosp), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste(freq_abs_1, " (", freq_rel_1, "%)"), y = freq_abs_1 + 2), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  labs(title = "Frequência absoluta e relativa de hospitalização",
+       x = "Nº de hospitalizações",
+       y = "Frequência Absoluta") +
+  scale_fill_manual(values = c("grey", "red")) +
+  theme_classic()+
+  theme(legend.position = "none")#+
+  scale_x_discrete(labels = c("nao" = "Não", "sim" = "Não"))
+
+# Cálculo da frequência absoluta
+freq_abs_2 <- table(dengue_clean$raca)
+
+# Cálculo da frequência relativa
+freq_rel_2 <- round((prop.table(freq_abs_2) * 100), 2)
+
+# Crie um dataframe com os dados
+dados_2 <- data.frame(raca = names(freq_abs_2),  freq_abs_2,  freq_rel_2)
+
+# Crie o gráfico com ggplot
+g3 <- ggplot(dados_2, aes(x = raca)) +
+  geom_bar(aes(y = freq_abs_2, fill = raca), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste(freq_abs_2, " (", freq_rel_2, "%)"), y = freq_abs_2 + 2), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  labs(title = "Frequência absoluta e relativa de etnia",
+       x = "Etnia",
+       y = "Frequência Absoluta") +
+  scale_fill_manual(values = c("grey", "grey20", "grey40","#00FFFF", "skyblue", "#87CEFA")) +
+  theme_classic()+
+  theme(legend.position = "none")
+
+# Cálculo da frequência absoluta
+freq_abs_3 <- table(dengue_clean$ano_infec)
+
+# Cálculo da frequência relativa
+freq_rel_3 <- round((prop.table(freq_abs_3) * 100), 2)
+
+# Crie um dataframe com os dados
+dados_3 <- data.frame(ano_infec = names(freq_abs_3), freq_abs_3, freq_rel_3)
+
+# Crie o gráfico com ggplot
+g4 <- ggplot(dados_3, aes(x = ano_infec)) +
+  geom_bar(aes(y = freq_abs_3, fill = ano_infec), stat = "identity", position = "dodge", color = "black") +
+  geom_text(aes(label = paste(freq_abs_3, " (", freq_rel_3, "%)"), y = freq_abs_3 + 2), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +
+  labs(title = "Frequência absoluta e relativa de ano de infecção",
+       x = "Ano da infecção",
+       y = "Frequência Absoluta") +
+  scale_fill_manual(values = c("grey", "grey20", "grey40", "#87CEFA", "#00FFFF", "#3293a8", "red")) +
+  theme_classic()+
+  theme(legend.position = "none")
+
+
+# Crie o gráfico de histograma
+g5 <- ggplot(dengue_clean, aes(x = idade_sint)) +
+  geom_histogram(binwidth = 4, fill = "skyblue", color = "black", alpha = 1.5) +
+  labs(title = "",
+       x = "Idade (anos)",
+       y = "Observações (n)") +
+  theme_classic()+
+  theme(legend.position = "none")
+
+
+# Exiba o gráfico
+print(g1)
+print(g2)
+print(g3)
+print(g4)
+print(g5)
+
+plot_grid(g2,g1,g3,g4,
+          
+          labels = c('A', 'B', 'C', "D"), nrow=2, ncol=2, scale = c(1, 1, 1))
+
+ggsave ("desc.tiff", width = 21, height= 12, dpi=500)
+ggsave ("desc.jpg", width = 21, height= 12, dpi=500)
+
+plot_grid (g5)
+
+ggsave ("idade.tiff", width = 8, height= 6, dpi=400)
+ggsave ("idade.jpg", width = 8, height= 6, dpi=400)
+
+
+print("Estátistica descritiva da varìavel idade_sint")
+summary(dengue_clean$idade_sint)
+
+```
+
+## Dumização dos dados
+
+As variaveis qualitativas passaram pelo processo de one-hoting encondig para facilitar a implementação do algoritmo.
+
+```{r}
+nomes_2 <- names(dengue_clean)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#Dumizei somente as variaveis que não causam vazamento de dados 
+dengue_clean <- dummy_columns(.data = dengue_clean, c("sex",          "gest","raca","febre","mialgia","cefaleia","exantema",         "vomito","nausea","dor_costas","conjuntivite","artrite", 
+"artralgia","petequia","laco","leucopenia","dor_retro","dm2",
+"has","hemato","hepaticas","renal","d_acido_pep","auto_imune",
+"escol","hosp","soro_dengue","pcr","anti_prnt","dg_pulso",    "dg_pa_conv","dg_tempo_cap","dg_insuf","dg_taqui","dg_ext_fria",      "dg_vom_sangue","dg_fezes_sangue","dg_metro_vol","dg_sangue_snc",    "dg_enzi_figado","dg_miocardite","dg_alt_conc","dg_out_orgao", "resul_elisa_deng","resul_iso_viral", "soro_tipo_deng",   "resul_histopa", "resul_imunoh", "deng_mm_res"),
+ remove_selected_columns = T, remove_first_dummy = T)
+
+
+dengue_clean <- dengue_clean |>
+  dplyr::rename(hosp = hosp_sim)   
+
+dengue_clean$hosp <- as_factor(dengue_clean$hosp)
+
+
+nomes_2 <- names(dengue_clean)
+```
+
+## Normalização das varíaveis quantitativas
+
+A variavel "**idade_sint**" referente a idade dos pacientes no momento do ínicio dos sintomas passou pelo processo de normalização
+
+```{r}
+dengue_clean$idade_sint <- scale(dengue_clean$idade_sint)
+dengue_clean$idade_sint <- dengue_clean$idade_sint[,1]
+print("Estátistica descritiva da varìavel idade_sint")
+summary(dengue_clean$idade_sint)
+
+```
+
+## Divisão em treino (80%), teste (20%) e validação (2023-2024)
+
+Optei por utilizar uma separação adicional, ou seja, o ano de 2024, para demonstrar a eficiência do modelo em dados novos, que poderiam ocorrer nos próximos anos.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+print("Observações por ano")
+
+table(dengue_clean$ano_infec)
+d_vali <- dengue_clean |> 
+  filter(ano_infec >= 2023)
+
+d_model <-  dengue_clean |> 
+  filter(ano_infec <=2022)
+
+### Split
+
+set.seed(39)
+treino1 <- d_model %>%
+  slice_sample(prop = 0.8, replace = FALSE)  # Proporção de 80% para treino
+
+teste1 <- d_model %>%
+  anti_join(treino1, by = "id")
+
+
+cont <- table(d_vali$hosp)
+cont1 <- table(teste1$hosp)
+cont2 <- table(treino1$hosp)
+
+
+print("Hospitalização no treino")
+print(cat(round(cont2[2]/cont2[1]*100,2),"%"))
+
+print("Hospitalização no teste")
+print(cat(round(cont1[2]/cont1[1]*100,2),"%"))
+
+print("Hospitalização na validação (2023-2024)")
+print(cat(round(cont[2]/cont[1]*100,2),"%"))
+
+```
+
+## Boruta
+
+Devido a grande dimensionalidade do banco em nº de varíaveis e observações utilizamos o algoritmo boruta para selecionar as varíaveis mais relevantes para predição, utilizamos uma sub-amostra de 20000 observações.
+
+```{r}
+
+set.seed(39)
+
+# Selecione um subconjunto aleatório do conjunto de dados
+sample_size <- 20000
+data_sample <- treino1[sample(1:nrow(treino1), sample_size), ]
+
+# Defina o número de árvores de decisão
+ntree <- 100
+
+# Execute o algoritmo Boruta
+boruta <- Boruta(hosp ~ .-hosp -ano_infec - id, data = data_sample , ntree = ntree, parallel = TRUE)
+
+# Exiba as variáveis selecionadas
+boruta$finalDecision
+
+print(boruta)
+
+### Plotar a classificação das variaveis
+plot(boruta, xlab = "", xaxt = "n")
+lz<-lapply(1:ncol(boruta$ImpHistory),function(i)
+boruta$ImpHistory[is.finite(boruta$ImpHistory[,i]),i])
+names(lz) <- colnames(boruta$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+at = 1:ncol(boruta$ImpHistory), cex.axis = 0.4)
+
+```
+
+### Seleção das variáveis finais
+
+```{r}
+
+data_sample <- data_sample |> 
+  select(-id, -hosp,-ano_infec )
+
+final.boruta <- TentativeRoughFix(boruta)
+print(final.boruta)
+# Colete as variáveis confirmadas
+confirmed_variables <- final.boruta$finalDecision == "Confirmed"
+
+# Filtre as variáveis confirmadas
+filtered_data <- data_sample[, confirmed_variables]
+names_var <- colnames(filtered_data)
+
+print(names_var)
+
+```
+
+## Modelo 1: Regressão logística bínaria
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+set.seed(33)
+modelo_1 <-
+  glm(hosp ~ idade_sint + sex_male + gest_ignorado +              gest_n_aplica + gest_nao + raca_branca + raca_ignorado +            febre_sim + exantema_sim +  vomito_sim + nausea_sim +               dor_costas_sim + leucopenia_sim + dm2_sim + has_sim +               escol_ignorado + soro_dengue_n_realizado + soro_dengue_reagente +   pcr_n_realizado + pcr_reagente + dg_pulso_nao + dg_pa_conv_sim +    dg_tempo_cap_nao + dg_insuf_sim + dg_vom_sangue_nao + dg_fezes_sangue_nao + dg_metro_vol_nao + dg_sangue_snc_nao +         dg_enzi_figado_nao + dg_miocardite_nao + dg_alt_conc_nao +           dg_out_orgao_nao + resul_elisa_deng_n_realizado + resul_elisa_deng_negativo + resul_elisa_deng_positivo +   soro_tipo_deng_dengue_2 + soro_tipo_deng_n_realizado + deng_mm_res_sim,
+    family = "binomial",
+    data = treino1
+  )
+```
+
+### Resultados do modelo 1
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary(modelo_1)
+```
+
+```{r}
+ #extract_eq(modelo_1, use_coefs = T,
+         # wrap = F, show_distribution = T) #%>%
+  #kable() %>%
+  #kable_styling(
+                #full_width = T,
+                #font_size = 25)
+```
+
+```{r}
+summary(modelo_1)
+#confint(modelo_1)
+```
+
+### Predição do modelo 1(treino)
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+confusionMatrix(table(predict(modelo_1, type =                          "response") >= 0.35, treino1$hosp == "1")[2:1,2:1])
+```
+
+### Predição do modelo 1 na base de teste
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+prev_modelo_1 <- predict(modelo_1, newdata = teste1, type = "response")
+
+# Converta as probabilidades para rótulos (0 ou 1) usando um limiar específico
+limiar_1 <- 0.35
+
+
+rotulos_previstos_1 <- ifelse(prev_modelo_1 >= limiar_1, 1, 0)
+
+# Crie a matriz de confusão
+confusionMatrix(table(rotulos_previstos_1,teste1$hosp))
+
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+
+roc_modelo_1 <- 
+  roc(teste1$hosp, prev_modelo_1)
+print(roc_modelo_1)
+
+coord_1<- coords(roc_modelo_1, "all")
+
+especificidade_1 <- coord_1$specificity
+
+sensitividade_1 <- coord_1$sensitivity
+
+cutoffs_1 <- coord_1$threshold
+
+dados_plotagem_1 <- cbind.data.frame(cutoffs_1, especificidade_1, sensitividade_1)
+dados_plotagem_1
+
+```
+
+### Calibração
+
+```{r}
+# Supondo que 'modelo' seja o seu modelo e 'teste1' seja o seu conjunto de teste
+# Substitua 'modelo' e 'teste1' pelos nomes adequados
+
+# Realize previsões no conjunto de teste
+probs <- predict(modelo_1, newdata = teste1, type = "response")
+
+# Divida os dados em intervalos de probabilidade
+probs_cat <- cut(probs, breaks = seq(0, 1, by = 0.1))
+
+# Conte o número de observações em cada intervalo
+freq <- table(probs_cat, teste1$hosp)
+
+# Crie um dataframe com os resultados
+dados_calibracao <- data.frame(
+  probs = as.numeric(levels(probs_cat)),
+  obs = freq[, 1] / sum(freq[, 1]),
+  pred = freq[, 2] / sum(freq[, 2])
+)
+
+# Crie um gráfico de linha
+library(ggplot2)
+
+ggplot(dados_calibracao, aes(x = pred, y = obs)) +
+  geom_point() +
+  geom_line(aes(x = pred, y = pred), color = "red", linetype = "dashed") +
+  labs(title = "Gráfico de Calibração",
+       x = "Previsões",
+       y = "Observações Reais")+
+  theme_classic()
+
+```
+
+### Métricas adicionais
+
+```{r, message=FALSE, warning=FALSE}
+
+#install.packages("MLmetrics")
+
+library(MLmetrics)
+
+print("F1 Score")
+F1_Score(teste1$hosp,rotulos_previstos_1, positive = "1")
+print("Acurácia")
+Accuracy(rotulos_previstos_1,teste1$hosp)
+print("Recall")
+Recall(teste1$hosp,rotulos_previstos_1, positive = "1")
+print("Precision")
+Precision(teste1$hosp,rotulos_previstos_1, positive = "1")
+```
+
+### Gráfico índividual modelo 1 no teste
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_1, y = sensitividade_1),
+            color = "gray20", size = 0.7, linetype = "dashed",
+            label = "Test") +
+  labs(main= "Model 1", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 1: AUC",
+                     round(roc_modelo_1$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+
+```
+
+### Predição do modelo 1 na base de validação
+
+```{r}
+prev_modelo_1_a <- predict(modelo_1, newdata = d_vali, type = "response")
+
+# Converta as probabilidades para rótulos (0 ou 1) usando um limiar específico
+limiar_a <- 0.35
+
+
+rotulos_previstos_1_a <- ifelse(prev_modelo_1_a >= limiar_a, 1, 0)
+
+# Crie a matriz de confusão
+confusionMatrix(table(rotulos_previstos_1_a,d_vali$hosp))
+
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+
+roc_modelo_1_a <- 
+  roc(d_vali$hosp, prev_modelo_1_a)
+print(roc_modelo_1_a)
+
+coord_1_a<- coords(roc_modelo_1_a, "all")
+
+especificidade_1_a <- coord_1_a$specificity
+
+sensitividade_1_a <- coord_1_a$sensitivity
+
+cutoffs_1_a <- coord_1_a$threshold
+
+dados_plotagem_1_a <- cbind.data.frame(cutoffs_1_a, especificidade_1_a, sensitividade_1_a)
+dados_plotagem_1_a
+
+```
+
+### Métricas adicionais
+
+```{r}
+#install.packages("MLmetrics")
+
+library(MLmetrics)
+
+print("F1 Score")
+F1_Score(d_vali$hosp,rotulos_previstos_1_a, positive = "1")
+print("Acurácia")
+Accuracy(rotulos_previstos_1_a,d_vali$hosp)
+print("Recall")
+Recall(d_vali$hosp,rotulos_previstos_1_a, positive = "1")
+print("Precision")
+Precision(d_vali$hosp,rotulos_previstos_1_a, positive = "1")
+```
+
+### Gráfico na base de validação
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_1_a, y = sensitividade_1_a),
+            color = "gray20", size = 0.7, linetype = "dashed",
+            label = "Test") +
+  labs(main= "Model 1", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 1b: AUC",
+                     round(roc_modelo_1_a$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+
+```
+
+## Modelo 2: Árvore de decisão
+
+```{r}
+set.seed(33)
+
+modelo_2 <-
+  rpart::rpart(
+    hosp ~  idade_sint + sex_male + gest_ignorado +              gest_n_aplica + gest_nao + raca_branca + raca_ignorado +            febre_sim + exantema_sim +  vomito_sim + nausea_sim +               dor_costas_sim + leucopenia_sim + dm2_sim + has_sim +               escol_ignorado + soro_dengue_n_realizado + soro_dengue_reagente +   pcr_n_realizado + pcr_reagente + dg_pulso_nao + dg_pa_conv_sim +    dg_tempo_cap_nao + dg_insuf_sim + dg_vom_sangue_nao + dg_fezes_sangue_nao + dg_metro_vol_nao + dg_sangue_snc_nao +         dg_enzi_figado_nao + dg_miocardite_nao + dg_alt_conc_nao +           dg_out_orgao_nao + resul_elisa_deng_n_realizado + resul_elisa_deng_negativo + resul_elisa_deng_positivo +   soro_tipo_deng_dengue_2 + soro_tipo_deng_n_realizado + deng_mm_res_sim,
+    data = treino1,
+    parms = list(split = 'gini'),
+    # podemos trocar para  'information'
+    method = 'class',
+    xval = 10,
+    control = rpart.control(
+      cp = 0.009
+    )
+  )
+```
+
+### Plotagem da árvore
+
+```{r}
+
+### Paleta 
+paleta_cinza <- gray(c(seq(0.75, 1, length = 20)))
+
+rpart.plot::rpart.plot(modelo_2,
+                       box.palette = paleta_cinza) # Paleta de cores
+
+
+```
+
+### Predições árvore na base de treino
+
+```{r}
+
+# Realize a predição
+predicoes_2 <- predict(modelo_2, treino1, type = "class")
+treino1$hosp <- as.factor(treino1$hosp)
+
+# Crie a matriz de confusão
+conf_matrix_2 <- confusionMatrix(predicoes_2,treino1$hosp)
+
+# Visualize as métricas
+print(conf_matrix_2)
+
+# Ajuste a predição para obter as probabilidades
+probabilidades_2 <- predict(modelo_2, treino1, type = "prob")
+
+# A função roc() do pacote pROC calcula a curva ROC e a AUC
+curva_roc_2 <- pROC::roc(treino1$hosp, probabilidades_2[, "1"])
+
+# Calcule a AUC
+auc_valor_2 <- pROC::auc(curva_roc_2)
+
+# Encontre o melhor ponto de corte
+melhor_corte_2 <- pROC::coords(curva_roc_2, "best", ret = "threshold")
+
+# Imprima a AUC e o melhor ponto de corte
+cat("AUC:", auc_valor_2, "\n")
+cat("Cutoff:", melhor_corte_2$threshold, "\n")
+
+# Use o valor de corte na predição
+predicoes_cut <- ifelse(probabilidades_2[, "1"] > melhor_corte_2$threshold, 1,0 )
+
+# Converta as variáveis para fatores com os mesmos níveis
+predicoes_cut <- factor(predicoes_cut, levels = levels(treino1$hosp))
+```
+
+### Ajuste do CP
+
+```{r}
+# pós-poda (Grid Search) #
+##########################
+
+tab_cp <- rpart::printcp(modelo_2)
+
+plotcp(modelo_2)
+
+
+tab_cp[which.min(tab_cp[,'xerror']),]
+cp_min <- tab_cp[which.min(tab_cp[,'xerror']),'CP']
+
+cp_min
+```
+
+```{r}
+summary(modelo_2)
+```
+
+### Predições árvore na base de teste
+
+```{r}
+predicoes_2_a <- predict(modelo_2, teste1, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_2_a <- ifelse(predicoes_2_a[, "1"] >= 0.5, 1, 0)
+
+#### igualar níveis
+# Função para igualar o número de níveis das variáveis
+igualar_niveis <- function(pred, obs) {
+  pred <- as.factor(pred)
+  obs <- as.factor(obs)
+
+  if (nlevels(pred) > nlevels(obs)) {
+    obs <- droplevels(obs)
+  } else if (nlevels(pred) < nlevels(obs)) {
+    pred <- droplevels(pred)
+  }
+  return(list(pred = pred, obs = obs))
+}
+
+# Igualar o número de níveis das variáveis
+dados_igualados_2_a <- igualar_niveis(prob_2_a, teste1$hosp)
+
+# Criar a matriz de confusão
+conf_matrix_igualados_2_a <- confusionMatrix(dados_igualados_2_a$pred, dados_igualados_2_a$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_2_a)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_2_a <- roc(teste1$hosp, predicoes_2_a[, "1"])
+print(roc_modelo_2_a)
+
+# Obtenha coordenadas ROC
+coord_2_a <- coords(roc_modelo_2_a, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_2_a <- coord_2_a$specificity
+sensitividade_2_a <- coord_2_a$sensitivity
+cutoffs_2_a <- coord_2_a$threshold
+cutoffs_2_a
+
+# Crie um data frame para plotagem
+dados_plotagem_2 <- data.frame(cutoffs_2_a, especificidade_2_a, sensitividade_2_a)
+
+```
+
+### Métricas adicionais
+
+```{r}
+print("F1 Score")
+F1_Score(teste1$hosp,prob_2_a, positive = "1")
+print("Acurácia")
+Accuracy(prob_2_a,teste1$hosp)
+print("Recall")
+Recall(teste1$hosp,prob_2_a, positive = "1")
+print("Precision")
+Precision(teste1$hosp,prob_2_a, positive = "1")
+```
+
+### Gráfico índividual modelo 2 teste
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_2_a, y = sensitividade_2_a),
+            color = "gray20", size = 0.7, linetype = "solid",
+            label = "Test") +
+  labs(main= "Model 2", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 2: AUC",
+                     round(roc_modelo_2_a$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+ 
+```
+
+### Predições árvore na base de validação
+
+```{r}
+predicoes_2_b <- predict(modelo_2, d_vali, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_2_b <- ifelse(predicoes_2_b[, "1"] >= 0.35, 1, 0)
+
+
+# Igualar o número de níveis das variáveis
+dados_igualados_b <- igualar_niveis(prob_2_b, d_vali$hosp)
+
+# Criar a matriz de confusão
+conf_matrix_igualados_b <- confusionMatrix(dados_igualados_b$pred, dados_igualados_b$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_b)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_2_b <- roc(d_vali$hosp, predicoes_2_b[, "1"])
+print(roc_modelo_2_b)
+
+# Obtenha coordenadas ROC
+coord_2_b <- coords(roc_modelo_2_b, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_2_b <- coord_2_b$specificity
+sensitividade_2_b <- coord_2_b$sensitivity
+cutoffs_2_b<- coord_2_b$threshold
+cutoffs_2_b
+
+# Crie um data frame para plotagem
+dados_plotagem_2_b <- data.frame(cutoffs_2_b, especificidade_2_b, sensitividade_2_b)
+```
+
+### Métricas adicionais na base de validação
+
+```{r}
+print("F1 Score")
+F1_Score(d_vali$hosp,prob_2_b, positive = "1")
+print("Acurácia")
+Accuracy(prob_2_b,d_vali$hosp)
+print("Recall")
+Recall(d_vali$hosp,prob_2_b, positive = "1")
+print("Precision")
+Precision(d_vali$hosp,prob_2_b, positive = "1")
+```
+
+### Gráfico índividual modelo 2 validação
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_2_b, y = sensitividade_2_b),
+            color = "gray20", size = 0.7, linetype = "solid",
+            label = "Test") +
+  labs(main= "Model 2", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 2b: AUC",
+                     round(roc_modelo_2_b$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+ 
+```
+
+## Modelo 3: RandomForest
+
+```{r}
+set.seed(39)
+# Treina a Random Forest
+modelo_3 <- randomForest(
+  hosp ~ idade_sint + sex_male + gest_ignorado +              gest_n_aplica + gest_nao + raca_branca + raca_ignorado +            febre_sim + exantema_sim +  vomito_sim + nausea_sim +               dor_costas_sim + leucopenia_sim + dm2_sim + has_sim +               escol_ignorado + soro_dengue_n_realizado + soro_dengue_reagente +   pcr_n_realizado + pcr_reagente + dg_pulso_nao + dg_pa_conv_sim +    dg_tempo_cap_nao + dg_insuf_sim + dg_vom_sangue_nao + dg_fezes_sangue_nao + dg_metro_vol_nao + dg_sangue_snc_nao + dg_enzi_figado_nao + dg_miocardite_nao + dg_alt_conc_nao +           dg_out_orgao_nao + resul_elisa_deng_n_realizado + resul_elisa_deng_negativo + resul_elisa_deng_positivo +   soro_tipo_deng_dengue_2 + soro_tipo_deng_n_realizado + deng_mm_res_sim,
+  data = treino1,
+  nodesize = 5,
+  ntree = 200
+)
+```
+
+### Predições modelo 3 treino
+
+```{r}
+
+# Realize a predição
+predicoes_3 <- predict(modelo_3, treino1, type = "class")
+
+# Crie a matriz de confusão
+conf_matrix_3 <- confusionMatrix(predicoes_3,treino1$hosp)
+
+# Visualize as métricas
+print(conf_matrix_3)
+
+
+# Ajuste a predição para obter as probabilidades
+probabilidades_3 <- predict(modelo_3, treino1, type = "prob")
+
+# A função roc() do pacote pROC calcula a curva ROC e a AUC
+curva_roc_3 <- pROC::roc(treino1$hosp, probabilidades_3[, "1"])
+
+# Calcule a AUC
+auc_valor_3 <- pROC::auc(curva_roc_3)
+
+# Encontre o melhor ponto de corte
+melhor_corte_3 <- pROC::coords(curva_roc_3, "best", ret = "threshold")
+
+# Imprima a AUC e o melhor ponto de corte
+cat("AUC:", auc_valor_3, "\n")
+cat("Cutoff:", melhor_corte_3$threshold, "\n")
+
+# Use o valor de corte na predição
+predicoes_cut3 <- ifelse(probabilidades_3[, "1"] > melhor_corte_3$threshold, 1,0 )
+
+# Converta as variáveis para fatores com os mesmos níveis
+predicoes_cut3 <- factor(predicoes_cut3, levels = levels(treino1$hosp))
+
+
+```
+
+### Predições do modelo 3 no teste
+
+```{r}
+
+predicoes_3_a <- predict(modelo_3, teste1, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_3_a <- ifelse(predicoes_3_a[, "1"] >= 0.5, 1, 0)
+
+#### igualar níveis
+# Função para igualar o número de níveis das variáveis
+igualar_niveis <- function(pred, obs) {
+  pred <- as.factor(pred)
+  obs <- as.factor(obs)
+
+  if (nlevels(pred) > nlevels(obs)) {
+    obs <- droplevels(obs)
+  } else if (nlevels(pred) < nlevels(obs)) {
+    pred <- droplevels(pred)
+  }
+  return(list(pred = pred, obs = obs))
+}
+
+# Igualar o número de níveis das variáveis
+dados_igualados_3_a <- igualar_niveis(prob_3_a, teste1$hosp)
+
+# Criar a matriz de confusão
+conf_matrix_igualados_3_a <- confusionMatrix(dados_igualados_3_a$pred, dados_igualados_3_a$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_3_a)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_3_a <- roc(teste1$hosp, predicoes_3_a[, "1"])
+print(roc_modelo_3_a)
+
+# Obtenha coordenadas ROC
+coord_3_a <- coords(roc_modelo_3_a, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_3_a <- coord_3_a$specificity
+sensitividade_3_a <- coord_3_a$sensitivity
+cutoffs_3_a <- coord_3_a$threshold
+
+# Crie um data frame para plotagem
+dados_plotagem_3_a <- data.frame(cutoffs_3_a, especificidade_3_a, sensitividade_3_a)
+```
+
+### Métricas adicionais do teste
+
+```{r}
+print("F1 Score")
+F1_Score(teste1$hosp,prob_3_a, positive = "1")
+print("Acurácia")
+Accuracy(prob_3_a,teste1$hosp)
+print("Recall")
+Recall(teste1$hosp,prob_3_a, positive = "1")
+print("Precision")
+Precision(teste1$hosp,prob_3_a, positive = "1")
+```
+
+### Gráfico índividual modelo 3 de teste
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_3_a, y = sensitividade_3_a),
+            color = "gray20", size = 0.7, linetype = "dotted",
+            label = "Test") +
+  labs(main= "Model 3", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 3: AUC",
+                     round(roc_modelo_3_a$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2) 
+ 
+```
+
+### Predição no banco de validação
+
+```{r}
+predicoes_3_b <- predict(modelo_3, d_vali, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+
+prob_3_b <- ifelse(predicoes_3_b[, "1"] >= 0.35, 1, 0)
+
+# Igualar o número de níveis das variáveis
+dados_igualados_3_b <- igualar_niveis(prob_3_b, d_vali$hosp)
+
+
+# Criar a matriz de confusão
+conf_matrix_igualados_3_b <- confusionMatrix(dados_igualados_3_b$obs, dados_igualados_3_b$pred)
+
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_3_b)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_3_b <- roc(d_vali$hosp, predicoes_3_b[, "1"])
+print(roc_modelo_3_b)
+
+# Obtenha coordenadas ROC
+coord_3_b <- coords(roc_modelo_3_b, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_3_b <- coord_3_b$specificity
+sensitividade_3_b <- coord_3_b$sensitivity
+cutoffs_3_b <- coord_3_b$threshold
+
+# Crie um data frame para plotagem
+dados_plotagem_3_b <- data.frame(cutoffs_3_b, especificidade_3_b, sensitividade_3_b)
+```
+
+### Métricas adicionais de validação
+
+```{r}
+print("F1 Score")
+F1_Score(d_vali$hosp,prob_3_b, positive = "1")
+print("Acurácia")
+Accuracy(prob_3_b,d_vali$hosp)
+print("Recall")
+Recall(d_vali$hosp,prob_3_b, positive = "1")
+print("Precision")
+Precision(d_vali$hosp,prob_3_b, positive = "1")
+```
+
+### Gráfico índividual modelo 3 de validação
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_3_b, y = sensitividade_3_b),
+            color = "gray20", size = 0.7, linetype = "dotted",
+            label = "Test") +
+  labs(main= "Model 3", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 3b: AUC",
+                     round(roc_modelo_3_b$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2) 
+```
+
+# Gráfico geral na base de teste
+
+```{r}
+n1 <- ggplot() +
+  # Linha diagonal cinza
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1), color = "black", size = 0.2) +
+  
+  # Curvas ROC de cada modelo com cores e linhatypes distintos
+  geom_line(data = dados_plotagem_1, aes(x = 1 - especificidade_1, y = sensitividade_1, color = "LR", linetype = "LR")) +
+  geom_line(data = dados_plotagem_2, aes(x = 1 - especificidade_2_a, y = sensitividade_2_a, color = "DT", linetype = "DT")) +
+  geom_line(data = dados_plotagem_3_a, aes(x = 1 - especificidade_3_a, y = sensitividade_3_a, color = "RF", linetype = "RF")) +
+  
+  # Título e labels
+  labs(title = "AUC na base de teste dos modelos sem balanceamento",
+    subtitle = "LR - AUC = 0.728 | DT - AUC = 0.518 | RF - AUC = 0.620",
+    x = "Falso positivo (1 - especificidade)",
+    y = "Verdadeiro positivo (sensibilidade)") +
+  
+  # Tema
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 8),
+        legend.position = "right") +
+  
+  # Adiciona legendas para cores e tipos de linha
+  scale_color_manual(name = "Model", values = c("LR" = "blue", "DT" = "green", "RF" = "red")) +
+ scale_linetype_manual(name = "Model", values = c("LR" = "dashed", "DT" = "dotted", "RF" = "twodash"))
+n1
+```
+
+# Gráfico geral na base de validação
+
+```{r}
+n2 <- ggplot() +
+  # Linha diagonal cinza
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1), color = "black", size = 0.2) +
+  
+  # Curvas ROC de cada modelo com cores e linhatypes distintos
+  geom_line(data = dados_plotagem_1_a, aes(x = 1 - especificidade_1_a, y = sensitividade_1_a, color = "LR", linetype = "LR")) +
+  geom_line(data = dados_plotagem_2_b, aes(x = 1 - especificidade_2_b, y = sensitividade_2_b, color = "DT", linetype = "DT")) +
+  geom_line(data = dados_plotagem_3_b, aes(x = 1 - especificidade_3_b, y = sensitividade_3_b, color = "RF", linetype = "RF")) +
+  
+  # Título e labels
+  labs(title = "AUC na base de validação dos modelos sem balanceamento",
+    subtitle = "LR - AUC = 0.724 | DT - AUC = 0.521 | RF - AUC = 0.657",
+    x = "Falso positivo (1 - especificidade)",
+    y = "Verdadeiro positivo (sensibilidade)") +
+  
+  # Tema
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 8),
+        legend.position = "right") +
+  
+  # Adiciona legendas para cores e tipos de linha
+  scale_color_manual(name = "Model", values = c("LR" = "blue", "DT" = "green", "RF" = "red")) +
+ scale_linetype_manual(name = "Model", values = c("LR" = "dashed", "DT" = "dotted", "RF" = "twodash"))
+n2
+```
+
+## Aplicação de reamostragem na classe minoritária (SMOTE)
+
+Realizei a reamostragem das observações com relação a variável "X" **hosp**, levando em conta o desbalanceamento do desfecho, após alguns teste a melhor proporção foi 30 % de casos (i.e hospitalização)
+
+```{r}
+
+### Organização para passar no pacote ROSE
+
+s_treino <- treino1 |> 
+  select(-id, -ano_infec)
+
+
+#########
+
+#install.packages("ROSE")
+library(ROSE)
+
+s_treino$hosp <- as.factor(s_treino$hosp)
+
+s_treino <- ROSE(formula = hosp ~ . -hosp, data = s_treino, seed = 39, p= .3)
+
+s_treino <- s_treino$data ### transformando ojeto da classe ROSE em data
+
+cont_s <- table(s_treino$hosp)
+print(cont_s)
+
+print("Hospitalização no treino")
+prop.table(cont_s)
+
+```
+
+## Modelo 4: Regressão logistica binaria com smoot (bootstrap)
+
+```{r}
+set.seed(39)
+modelo_4 <-
+  glm(hosp ~ idade_sint + sex_male + gest_ignorado +              gest_n_aplica + gest_nao + raca_branca + raca_ignorado +            febre_sim + exantema_sim +  vomito_sim + nausea_sim +               dor_costas_sim + leucopenia_sim + dm2_sim + has_sim +               escol_ignorado + soro_dengue_n_realizado + soro_dengue_reagente +   pcr_n_realizado + pcr_reagente + dg_pulso_nao + dg_pa_conv_sim +    dg_tempo_cap_nao + dg_insuf_sim + dg_vom_sangue_nao + dg_fezes_sangue_nao + dg_metro_vol_nao + dg_sangue_snc_nao +         dg_enzi_figado_nao + dg_miocardite_nao + dg_alt_conc_nao +           dg_out_orgao_nao + resul_elisa_deng_n_realizado + resul_elisa_deng_negativo + resul_elisa_deng_positivo +   soro_tipo_deng_dengue_2 + soro_tipo_deng_n_realizado + deng_mm_res_sim,
+    family = "binomial",
+    data = s_treino
+  )
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+confusionMatrix(table(predict(modelo_4, type =                          "response") >= 0.35, s_treino$hosp == "1")[2:1,2:1])
+```
+
+### Predição do modelo 4 na base de teste
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+prev_modelo_4 <- predict(modelo_4, newdata = teste1, type = "response")
+
+# Converta as probabilidades para rótulos (0 ou 1) usando um limiar específico
+limiar_4 <- 0.35
+
+
+rotulos_previstos_4<- ifelse(prev_modelo_4 >= limiar_4, 1, 0)
+
+# Crie a matriz de confusão
+confusionMatrix(table(rotulos_previstos_4,teste1$hosp))
+
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+
+roc_modelo_4 <- 
+  roc(teste1$hosp, prev_modelo_4)
+print(roc_modelo_4)
+
+coord_4<- coords(roc_modelo_4, "all")
+
+especificidade_4 <- coord_4$specificity
+
+sensitividade_4 <- coord_4$sensitivity
+
+cutoffs_4 <- coord_4$threshold
+
+dados_plotagem_4<- cbind.data.frame(cutoffs_4, especificidade_4, sensitividade_4)
+dados_plotagem_4
+
+```
+
+### Métricas adicionais do teste
+
+```{r}
+print("F1 Score")
+F1_Score(teste1$hosp,rotulos_previstos_4, positive = "1")
+print("Acurácia")
+Accuracy(rotulos_previstos_4,teste1$hosp)
+print("Recall")
+Recall(teste1$hosp,rotulos_previstos_4, positive = "1")
+print("Precision")
+Precision(teste1$hosp,rotulos_previstos_4, positive = "1")
+```
+
+### Gráfico do modelo 4 na base de teste
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_4, y = sensitividade_4),
+            color = "gray20", size = 0.7, linetype = "dashed",
+            label = "Test") +
+  labs(main= "Model 1", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 4: AUC",
+                     round(roc_modelo_4$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+```
+
+### Predição do modelo 4 na base de validação
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+prev_modelo_4_a <- predict(modelo_4, newdata = d_vali, type = "response")
+
+# Converta as probabilidades para rótulos (0 ou 1) usando um limiar específico
+limiar_4_a <- 0.35
+
+
+
+rotulos_previstos_4_a<- ifelse(prev_modelo_4_a>= limiar_4_a, 1, 0)
+
+# Crie a matriz de confusão
+confusionMatrix(table(rotulos_previstos_4_a,d_vali$hosp))
+
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+
+roc_modelo_4_a <- 
+  roc(d_vali$hosp, prev_modelo_4_a)
+print(roc_modelo_4_a)
+
+coord_4_a<- coords(roc_modelo_4_a, "all")
+
+especificidade_4_a <- coord_4_a$specificity
+
+sensitividade_4_a<- coord_4_a$sensitivity
+
+cutoffs_4_a<- coord_4_a$threshold
+
+dados_plotagem_4_a <- cbind.data.frame(cutoffs_4_a, especificidade_4_a, sensitividade_4_a)
+dados_plotagem_4_a
+
+```
+
+### Métrica adicionais modelo 4 na base de validação
+
+```{r}
+#install.packages("MLmetrics")
+
+library(MLmetrics)
+
+print("F1 Score")
+F1_Score(d_vali$hosp,rotulos_previstos_4_a, positive = "1")
+print("Acurácia")
+Accuracy(rotulos_previstos_4_a,d_vali$hosp)
+print("Recall")
+Recall(d_vali$hosp,rotulos_previstos_4_a, positive = "1")
+print("Precision")
+Precision(d_vali$hosp,rotulos_previstos_4_a, positive = "1")
+```
+
+### Gráfico índividual modelo 4 na validação
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_4_a, y = sensitividade_4_a),
+            color = "gray20", size = 0.7, linetype = "dashed",
+            label = "Test") +
+  labs(main= "Model 1", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 4b: AUC",
+                     round(roc_modelo_4_a$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+
+```
+
+## Modelo 5: Árvore de decisão com smoot e boruta
+
+```{r}
+set.seed(39)
+
+modelo_5 <-
+  rpart::rpart(
+    hosp ~  idade_sint + sex_male + gest_ignorado +              gest_n_aplica + gest_nao + raca_branca + raca_ignorado +            febre_sim + exantema_sim +  vomito_sim + nausea_sim +               dor_costas_sim + leucopenia_sim + dm2_sim + has_sim +               escol_ignorado + soro_dengue_n_realizado + soro_dengue_reagente +   pcr_n_realizado + pcr_reagente + dg_pulso_nao + dg_pa_conv_sim +    dg_tempo_cap_nao + dg_insuf_sim + dg_vom_sangue_nao + dg_fezes_sangue_nao + dg_metro_vol_nao + dg_sangue_snc_nao +         dg_enzi_figado_nao + dg_miocardite_nao + dg_alt_conc_nao +           dg_out_orgao_nao + resul_elisa_deng_n_realizado + resul_elisa_deng_negativo + resul_elisa_deng_positivo +   soro_tipo_deng_dengue_2 + soro_tipo_deng_n_realizado + deng_mm_res_sim,
+    data = s_treino,
+    parms = list(split = 'information'),
+    # podemos trocar para  'information'
+    method = 'class',
+    xval = 10,
+    )
+  
+```
+
+### Coleta do CP e poda da árvore
+
+```{r}
+# pós-poda (Grid Search) #
+##########################
+
+tab_cp_5 <- rpart::printcp(modelo_5)
+
+plotcp(modelo_5)
+
+
+tab_cp_5[which.min(tab_cp_5[,'xerror']),]
+cp_min_5 <- tab_cp_5[which.min(tab_cp_5[,'xerror']),'CP']
+
+cp_min_5
+
+
+modelo_5<- prune(modelo_5, cp = cp_min_5)
+```
+
+### Modelo 5 na base de treino
+
+```{r}
+
+predicoes_5 <- predict(modelo_5, s_treino, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_5 <- ifelse(predicoes_5[, "1"] >= 0.35, 1, 0)
+
+
+# Igualar o número de níveis das variáveis
+dados_igualados_5 <- igualar_niveis(prob_5, s_treino$hosp)
+
+# Criar a matriz de confusão
+conf_matrix_igualados_5 <- confusionMatrix(dados_igualados_5$pred, dados_igualados_5$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_5)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_5 <- roc(s_treino$hosp, predicoes_5[, "1"])
+print(roc_modelo_5)
+
+
+```
+
+### Modelo 5 na base de teste
+
+```{r}
+predicoes_5_a <- predict(modelo_5, teste1, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_5_a <- ifelse(predicoes_5_a[, "1"] >= 0.37, 1, 0)
+
+
+# Igualar o número de níveis das variáveis
+dados_igualados_5_a <- igualar_niveis(prob_5_a, teste1$hosp)
+
+
+# Criar a matriz de confusão
+conf_matrix_igualados_5_a <- confusionMatrix(dados_igualados_5_a$pred, dados_igualados_5_a$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_5_a)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_5_a <- roc(teste1$hosp, predicoes_5_a[, "1"])
+
+print(roc_modelo_5_a)
+
+# Obtenha coordenadas ROC
+coord_5_a <- coords(roc_modelo_5_a, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_5_a <- coord_5_a$specificity
+sensitividade_5_a <- coord_5_a$sensitivity
+cutoffs_5_a <- coord_5_a$threshold
+cutoffs_5_a
+
+# Crie um data frame para plotagem
+dados_plotagem_5_a <- data.frame(cutoffs_5_a, especificidade_5_a, sensitividade_5_a)
+
+
+```
+
+### Métricas adicionais do teste
+
+```{r}
+print("F1 Score")
+F1_Score(teste1$hosp,prob_5_a, positive = "1")
+print("Acurácia")
+Accuracy(prob_5_a,teste1$hosp)
+print("Recall")
+Recall(teste1$hosp,prob_5_a, positive = "1")
+print("Precision")
+Precision(teste1$hosp,prob_5_a, positive = "1")
+```
+
+### Gráfico do modelo 5 na base de teste
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_5_a, y = sensitividade_5_a),
+            color = "gray20", size = 0.7, linetype = "dashed",
+            label = "Test") +
+  labs(main= "Model 1", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 5: AUC",
+                     round(roc_modelo_5_a$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+```
+
+### Modelo 5 na base de validação
+
+```{r}
+predicoes_5_b <- predict(modelo_5, d_vali, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_5_b <- ifelse(predicoes_5_b[, "1"] >= 0.35, 1, 0)
+
+
+# Igualar o número de níveis das variáveis
+dados_igualados_5_b <- igualar_niveis(prob_5_b, d_vali$hosp)
+
+# Criar a matriz de confusão
+conf_matrix_igualados_5_b <- confusionMatrix(dados_igualados_5_b$pred, dados_igualados_5_b$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_5_b)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_5_b <- roc(d_vali$hosp, predicoes_5_b[, "1"])
+print(roc_modelo_5_b)
+
+# Obtenha coordenadas ROC
+coord_5_b <- coords(roc_modelo_5_b, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_5_b <- coord_5_b$specificity
+sensitividade_5_b <- coord_5_b$sensitivity
+cutoffs_5_b <- coord_5_b$threshold
+cutoffs_5_b
+
+# Crie um data frame para plotagem
+dados_plotagem_5_b <- data.frame(cutoffs_5_b, especificidade_5_b, sensitividade_5_b)
+
+
+```
+
+### Métricas adicionais de validação
+
+```{r}
+print("F1 Score")
+F1_Score(d_vali$hosp,prob_5_b, positive = "1")
+print("Acurácia")
+Accuracy(prob_5_b,d_vali$hosp)
+print("Recall")
+Recall(d_vali$hosp,prob_5_b, positive = "1")
+print("Precision")
+Precision(d_vali$hosp,prob_5_b, positive = "1")
+```
+
+### Gráfico do modelo 5 na base de validação
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_5_b, y = sensitividade_5_b),
+            color = "gray20", size = 0.7, linetype = "dashed",
+            label = "Test") +
+  labs(main= "Model 1", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 5b: AUC",
+                     round(roc_modelo_5_b$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2)
+```
+
+## Modelo 6: RandomForest com SMOOT e Boruta
+
+```{r}
+set.seed(39)
+# Treina a Random Forest
+modelo_6 <- randomForest(
+  hosp ~ idade_sint + sex_male + gest_ignorado +              gest_n_aplica + gest_nao + raca_branca + raca_ignorado +            febre_sim + exantema_sim +  vomito_sim + nausea_sim +               dor_costas_sim + leucopenia_sim + dm2_sim + has_sim +               escol_ignorado + soro_dengue_n_realizado + soro_dengue_reagente +   pcr_n_realizado + pcr_reagente + dg_pulso_nao + dg_pa_conv_sim +    dg_tempo_cap_nao + dg_insuf_sim + dg_vom_sangue_nao + dg_fezes_sangue_nao + dg_metro_vol_nao + dg_sangue_snc_nao +         dg_enzi_figado_nao + dg_miocardite_nao + dg_alt_conc_nao +           dg_out_orgao_nao + resul_elisa_deng_n_realizado + resul_elisa_deng_negativo + resul_elisa_deng_positivo +   soro_tipo_deng_dengue_2 + soro_tipo_deng_n_realizado + deng_mm_res_sim,
+  data = s_treino,
+  nodesize = 10,
+  ntree = 250
+)
+```
+
+### Predições modelo 6 treino
+
+```{r}
+
+# Realize a predição
+predicoes_6 <- predict(modelo_6, s_treino, type = "class")
+
+# Crie a matriz de confusão
+conf_matrix_6 <- confusionMatrix(predicoes_6,s_treino$hosp)
+
+# Visualize as métricas
+print(conf_matrix_6)
+
+# Ajuste a predição para obter as probabilidades
+probabilidades_6 <- predict(modelo_6, s_treino, type = "prob")
+
+# A função roc() do pacote pROC calcula a curva ROC e a AUC
+curva_roc_6 <- pROC::roc(s_treino$hosp, probabilidades_6[, "1"])
+
+# Calcule a AUC
+auc_valor_6 <- pROC::auc(curva_roc_6)
+
+# Encontre o melhor ponto de corte
+melhor_corte_6 <- pROC::coords(curva_roc_6, "best", ret = "threshold")
+
+# Imprima a AUC e o melhor ponto de corte
+cat("AUC:", auc_valor_6, "\n")
+cat("Cutoff:", melhor_corte_6$threshold, "\n")
+
+# Use o valor de corte na predição
+predicoes_cut6 <- ifelse(probabilidades_6[, "1"] > melhor_corte_6$threshold, 1,0 )
+
+# Converta as variáveis para fatores com os mesmos níveis
+predicoes_cut6 <- factor(predicoes_cut6, levels = levels(s_treino$hosp))
+
+```
+
+### Predições do modelo 6 no teste
+
+```{r}
+
+predicoes_6_a <- predict(modelo_3, teste1, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+prob_6_a <- ifelse(predicoes_6_a[, "1"] >= 0.5, 1, 0)
+
+# Igualar o número de níveis das variáveis
+dados_igualados_6_a <- igualar_niveis(prob_3_a, teste1$hosp)
+
+# Criar a matriz de confusão
+conf_matrix_igualados_6_a <- confusionMatrix(dados_igualados_6_a$pred, dados_igualados_6_a$obs)
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_6_a)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_6_a <- roc(teste1$hosp, predicoes_6_a[, "1"])
+print(roc_modelo_6_a)
+
+# Obtenha coordenadas ROC
+coord_6_a <- coords(roc_modelo_6_a, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_6_a <- coord_6_a$specificity
+sensitividade_6_a <- coord_6_a$sensitivity
+cutoffs_6_a <- coord_6_a$threshold
+
+# Crie um data frame para plotagem
+dados_plotagem_6_a <- data.frame(cutoffs_6_a, especificidade_6_a, sensitividade_6_a)
+```
+
+### Métricas adicionais do teste
+
+```{r}
+print("F1 Score")
+F1_Score(teste1$hosp,prob_6_a, positive = "1")
+print("Acurácia")
+Accuracy(prob_6_a,teste1$hosp)
+print("Recall")
+Recall(teste1$hosp,prob_6_a, positive = "1")
+print("Precision")
+Precision(teste1$hosp,prob_6_a, positive = "1")
+```
+
+### Gráfico índividual modelo 3 de teste
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_6_a, y = sensitividade_6_a),
+            color = "gray20", size = 0.7, linetype = "dotted",
+            label = "Test") +
+  labs(main= "Model 3", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 6: AUC",
+                     round(roc_modelo_6_a$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2) 
+ 
+```
+
+### Predição no banco de validação
+
+```{r}
+predicoes_6_b <- predict(modelo_3, d_vali, type = "prob")
+
+# Ajuste a predição para obter as probabilidades
+
+prob_6_b <- ifelse(predicoes_6_b[, "1"] >= 0.5, 1, 0)
+
+# Igualar o número de níveis das variáveis
+dados_igualados_6_b <- igualar_niveis(prob_6_b, d_vali$hosp)
+
+
+# Criar a matriz de confusão
+conf_matrix_igualados_6_b <- confusionMatrix(dados_igualados_6_b$obs, dados_igualados_6_b$pred)
+
+
+# Imprimir a matriz de confusão
+print(conf_matrix_igualados_6_b)
+
+# Calcule e exiba a curva ROC e a área sob a curva (AUC)
+roc_modelo_6_b <- roc(d_vali$hosp, predicoes_6_b[, "1"])
+print(roc_modelo_6_b)
+
+# Obtenha coordenadas ROC
+coord_6_b <- coords(roc_modelo_6_b, "all")
+
+# Extraia especificidade, sensibilidade e cutoffs
+especificidade_6_b <- coord_6_b$specificity
+sensitividade_6_b <- coord_6_b$sensitivity
+cutoffs_6_b <- coord_6_b$threshold
+
+# Crie um data frame para plotagem
+dados_plotagem_6_b <- data.frame(cutoffs_6_b, especificidade_6_b, sensitividade_6_b)
+```
+
+### Métricas adicionais de validação
+
+```{r}
+print("F1 Score")
+F1_Score(d_vali$hosp,prob_6_b, positive = "1")
+print("Acurácia")
+Accuracy(prob_6_b,d_vali$hosp)
+print("Recall")
+Recall(d_vali$hosp,prob_6_b, positive = "1")
+print("Precision")
+Precision(d_vali$hosp,prob_6_b, positive = "1")
+```
+
+### Gráfico índividual modelo 6 de validação
+
+```{r}
+ggplot() +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "grey40", size = 0.2) +
+  geom_line(aes(x = 1 - especificidade_6_b, y = sensitividade_6_b),
+            color = "gray20", size = 0.7, linetype = "dotted",
+            label = "Test") +
+  labs(main= "Model 3", x = "False positives (1 - specificity)",
+       y = "True positives (sensitivity)",
+       title = paste("Model 6b: AUC",
+                     round(roc_modelo_6_b$auc, 3))) +
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 10),
+        legend.position = "bottom") +
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1),
+               color = "black", size = 0.2) 
+```
+
+# Gráfico geral com balanceamento na base de teste
+
+```{r}
+ f1 <- ggplot() +
+  # Linha diagonal cinza
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1), color = "black", size = 0.2) +
+  
+  # Curvas ROC de cada modelo com cores e linhatypes distintos
+  geom_line(data = dados_plotagem_4, aes(x = 1 - especificidade_4, y = sensitividade_4, color = "LR", linetype = "LR")) +
+  geom_line(data = dados_plotagem_5_a, aes(x = 1 - especificidade_5_a, y = sensitividade_5_a, color = "DT", linetype = "DT")) +
+  geom_line(data = dados_plotagem_6_a, aes(x = 1 - especificidade_6_a, y = sensitividade_6_a, color = "RF", linetype = "RF")) +
+  
+  # Título e labels
+  labs(title = "AUC na base de teste nos modelos balenceados",
+    subtitle = "LR - AUC = 0.718 | DT - AUC = 0.519 | RF - AUC = 0.520",
+    x = "Falso positivos (1 - especificidade)",
+    y = "Verdadeiro positivo (sensibilidade)") +
+  
+  # Tema
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 8),
+        legend.position = "right") +
+  
+  # Adiciona legendas para cores e tipos de linha
+  scale_color_manual(name = "Model", values = c("LR" = "blue", "DT" = "green", "RF" = "red")) +
+ scale_linetype_manual(name = "Model", values = c("LR" = "dashed", "DT" = "dotted", "RF" = "twodash"))
+```
+
+# Gráfico geral com balanceamento na base de validação
+
+```{r}
+f2 <-  ggplot() +
+  # Linha diagonal cinza
+  geom_segment(aes(x = 0, xend = 1, y = 0, yend = 1), color = "black", size = 0.2) +
+  
+  # Curvas ROC de cada modelo com cores e linhatypes distintos
+  geom_line(data = dados_plotagem_4_a, aes(x = 1 - especificidade_4_a, y = sensitividade_4_a, color = "LR", linetype = "LR")) +
+  geom_line(data = dados_plotagem_5_b, aes(x = 1 - especificidade_5_b, y = sensitividade_5_b, color = "DT", linetype = "DT")) +
+  geom_line(data = dados_plotagem_6_b, aes(x = 1 - especificidade_6_b, y = sensitividade_6_b, color = "RF", linetype = "RF")) +
+  
+  # Título e labels
+  labs(title = "AUC na base de validação nos modelos balenceados",
+    subtitle = "LR - AUC = 0.731 | DT - AUC = 0.519 | RF - AUC = 0.647",
+     x = "Falso positivos (1 - especificidade)",
+    y = "Verdadeiro positivo (sensibilidade)") +
+  
+  # Tema
+  theme(panel.background = element_rect(NA),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 8),
+        legend.position = "right") +
+  
+  # Adiciona legendas para cores e tipos de linha
+  scale_color_manual(name = "Model", values = c("LR" = "blue", "DT" = "green", "RF" = "red")) +
+ scale_linetype_manual(name = "Model", values = c("LR" = "dashed", "DT" = "dotted", "RF" = "twodash"))
+```
+
+### 
+
+## Importâcia de varíaveis
+
+```{r}
+var_mod1 <- caret::varImp(modelo_1)
+var_mod2 <- caret::varImp(modelo_2)
+var_mod3 <- caret::varImp(modelo_3)
+var_mod4 <- caret::varImp(modelo_4)
+var_mod5 <- caret::varImp(modelo_5)
+var_mod6 <- caret::varImp(modelo_6)
+
+### modelo 1
+i_1 <- vip::vip(modelo_1, num_features = 5)+
+labs(y = 'Importância') +
+    theme_classic()+
+  theme(
+    # Tamanho da fonte do título
+    plot.title = element_text(size = 24),
+    # Tamanho da fonte dos rótulos dos eixos
+    axis.title = element_text(size = 20),
+    # Tamanho da fonte dos números nos eixos
+    axis.text = element_text(size = 20),
+    # Tamanho da fonte da legenda
+    legend.text = element_text(size = 20))+
+  scale_fill_manual("gray20")
+plot_grid(i_1)
+
+ggsave ("i1.jpeg", width = 10, height= 8, dpi=300)
+
+### Modelo 2
+
+i_2 <- vip::vip(modelo_2, num_features = 5)+
+labs(y = 'Importância') +
+    theme_classic()+
+  theme(
+    # Tamanho da fonte do título
+    plot.title = element_text(size = 24),
+    # Tamanho da fonte dos rótulos dos eixos
+    axis.title = element_text(size = 20),
+    # Tamanho da fonte dos números nos eixos
+    axis.text = element_text(size = 20),
+    # Tamanho da fonte da legenda
+    legend.text = element_text(size = 20))+
+  scale_fill_manual("gray20")
+plot_grid(i_2)
+
+ggsave ("i_2.jpeg", width = 10, height= 8, dpi=300)
+
+### Modelo 3
+
+i_3 <- vip::vip(modelo_3, num_features = 5)+
+labs(y = 'Importância') +
+    theme_classic()+
+  theme(
+    # Tamanho da fonte do título
+    plot.title = element_text(size = 24),
+    # Tamanho da fonte dos rótulos dos eixos
+    axis.title = element_text(size = 20),
+    # Tamanho da fonte dos números nos eixos
+    axis.text = element_text(size = 20),
+    # Tamanho da fonte da legenda
+    legend.text = element_text(size = 20))+
+  scale_fill_manual("gray20")
+plot_grid(i_3)
+
+ggsave ("i_3.jpeg", width = 10, height= 8, dpi=300)
+
+### Modelo 4
+
+i_4 <- vip::vip(modelo_4, num_features = 5)+
+labs(y = 'Importância') +
+    theme_classic()+
+  theme(
+    # Tamanho da fonte do título
+    plot.title = element_text(size = 24),
+    # Tamanho da fonte dos rótulos dos eixos
+    axis.title = element_text(size = 20),
+    # Tamanho da fonte dos números nos eixos
+    axis.text = element_text(size = 20),
+    # Tamanho da fonte da legenda
+    legend.text = element_text(size = 20))+
+  scale_fill_manual("gray20")
+plot_grid(i_4)
+
+ggsave ("i_4.jpeg", width = 10, height= 8, dpi=300)
+
+### Modelo 5
+
+i_5 <- vip::vip(modelo_5, num_features = 5)+
+labs(y = 'Importância') +
+    theme_classic()+
+  theme(
+    # Tamanho da fonte do título
+    plot.title = element_text(size = 24),
+    # Tamanho da fonte dos rótulos dos eixos
+    axis.title = element_text(size = 20),
+    # Tamanho da fonte dos números nos eixos
+    axis.text = element_text(size = 20),
+    # Tamanho da fonte da legenda
+    legend.text = element_text(size = 20))+
+  scale_fill_manual("gray20")
+plot_grid(i_5)
+
+ggsave ("i_5.jpeg", width = 10, height= 8, dpi=300)
+
+### Modelo 6
+
+i_6 <- vip::vip(modelo_6, num_features = 5)+
+labs(y = 'Importância') +
+    theme_classic()+
+  theme(
+    # Tamanho da fonte do título
+    plot.title = element_text(size = 24),
+    # Tamanho da fonte dos rótulos dos eixos
+    axis.title = element_text(size = 20),
+    # Tamanho da fonte dos números nos eixos
+    axis.text = element_text(size = 20),
+    # Tamanho da fonte da legenda
+    legend.text = element_text(size = 20))+
+  scale_fill_manual("gray20")
+plot_grid(i_6)
+
+ggsave ("i_6.jpeg", width = 10, height= 8, dpi=300)
+
+
+
+
+
+
+i_2 <- vip::vip(modelo_2)
+i_3 <- vip::vip(modelo_3)
+i_4<- vip::vip(modelo_4)
+i_5 <- vip::vip(modelo_5)
+i_6 <- vip::vip(modelo_6)
+
+# figura 1 ----------------------------------------------------------------
+
+
+plot_grid(i_1,i_2,i_3,
+          
+          labels = c('M1', 'M2', 'M3'), nrow=2, ncol=2, scale = c(1, 1, 1))
+
+ggsave ("importance.tiff", width = 16, height= 9, dpi=400)
+ggsave ("importance.jpeg", width = 16, height= 9, dpi=400)
+
+####### importancia 2
+
+plot_grid(i_4, i_5, i_6,
+          
+          labels = c('M4', 'M5', 'M6'), nrow=2, ncol=2, scale = c(1, 1, 1))
+
+ggsave ("importance_2.tiff", width = 16, height= 9, dpi=400)
+ggsave ("importance_2.jpeg", width = 16, height= 9, dpi=400)
+
+plot_grid(i_1)
+ggsave ("i1.jpeg", width = 10, height= 8, dpi=300)
+
+# figura 2 ------------------------------------------------------------
+
+plot_grid(n1, n2, f1,f2,
+          
+          labels = c('A', 'B', "C", "D"), nrow=2, ncol=2, scale = c(1, 1))
+
+ggsave ("auc.jpg", width = 16, height= 14, dpi=400)
+ggsave ("auc.tiff", width = 16, height= 14, dpi=400)
+g1
+g2
+
+```
